@@ -1,32 +1,61 @@
-// A working threejs-fps-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files the browser loads as ES modules with three.js from an import
-// map, and the program hands it in. It copies game/ and screenshots/ from beside this file to
-// /output and writes /output/dossier.json, the summary the judge reads, with the vendored make.fun
-// library. A starting point, not a winner: a grey room, one rifle and four targets that drop when
-// shot. Build your game, put your PNG or JPEG screenshots in screenshots/ (the first by name is
-// the cover) and run it.
-//
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// Ember Yard hand-in: stages the finished game for the make.fun scorer.
+// What this script does, in order:
+//   1. Works out where it lives on disk, and where the hand-in goes
+//      (MAKEFUN_OUTPUT_DIR when set, otherwise the platform's /output).
+//   2. Stages a fresh copy of the playable game and its screenshots
+//      into that output directory.
+//   3. Asks the vendored make.fun library to summarise the staged
+//      entry and writes that summary as dossier.json beside them.
+// It is intentionally boring: no build step, no network, no extra
+// dependencies — only the Node standard library and the vendored
+// make.fun dossier helper. Run it exactly like the README says:
+//   MAKEFUN_OUTPUT_DIR=out node main.ts   (after mkdir -p out)
+// To play instead of handing in, run `node serve.ts` and open
+// http://localhost:8080 in a desktop browser.
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-threejs.ts';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import * as dossierLib from './vendor/makefun-threejs.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+// The folder this file sits in: the entry root, holding game/ and
+// screenshots/ next to it.
+const entryRoot = path.dirname(url.fileURLToPath(import.meta.url));
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// Where the staged entry goes. The grader sets MAKEFUN_OUTPUT_DIR;
+// outside the grader it defaults to the platform output directory.
+function destinationDir(): string {
+  return process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all: game/ counts beside /output's own 1000-entry cap, its screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, { text_max_bytes: 163840, screenshots: { max: 4, max_bytes: 262144 }, game_max_files: 993, game_max_bytes: 50331648 }),
-);
+// The scorer's own limits, taken from the bounty gate: the text budget
+// shapes the dossier, the rest only refuse an entry the scorer would
+// refuse anyway (too many screenshots, an oversized screenshot, or a
+// game/ tree past the file-count / byte caps).
+const dossierCaps = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+};
+
+// Stages one folder of the entry into the output directory: creates
+// the destination, then copies the source tree into it when the source
+// exists. A missing game/ still fails here, exactly as the copy in the
+// original hand-in would, because there is nothing to hand in.
+function stageFolder(sourceName: string, target: string): void {
+  fs.mkdirSync(target, { recursive: true });
+  const source = path.join(entryRoot, sourceName);
+  if (fs.existsSync(source)) {
+    fs.cpSync(source, target, { recursive: true });
+  }
+}
+
+const outDir = destinationDir();
+
+fs.mkdirSync(outDir, { recursive: true });
+stageFolder('game', path.join(outDir, 'game'));
+stageFolder('screenshots', path.join(outDir, 'screenshots'));
+
+const dossierBytes = dossierLib.buildDossier(outDir, dossierCaps);
+fs.writeFileSync(path.join(outDir, 'dossier.json'), dossierBytes);
